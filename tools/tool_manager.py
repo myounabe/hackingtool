@@ -1,98 +1,89 @@
-import os
-import sys
 import subprocess
-from time import sleep
-
-from rich.prompt import Confirm
-
-from core import HackingTool, HackingToolsCollection, console
-from constants import APP_INSTALL_DIR, APP_BIN_PATH, USER_CONFIG_DIR, REPO_URL
+import os
+import shutil
+from dataclasses import dataclass, field
+from typing import List, Optional
 
 
-class UpdateTool(HackingTool):
-    TITLE = "Update Tool or System"
-    DESCRIPTION = "Update system packages or pull the latest hackingtool code"
+@dataclass
+class Tool:
+    name: str
+    description: str
+    install_command: str
+    category: str
+    repo_url: Optional[str] = None
+    dependencies: List[str] = field(default_factory=list)
+
+    def is_installed(self) -> bool:
+        """Check if the tool binary is available on PATH."""
+        return shutil.which(self.name) is not None
+
+    def install(self) -> bool:
+        """Run the install command. Returns True on success."""
+        try:
+            result = subprocess.run(
+                self.install_command,
+                shell=True,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            print(f"[+] {self.name} installed successfully.")
+            return True
+        except subprocess.CalledProcessError as exc:
+            print(f"[-] Failed to install {self.name}: {exc.stderr.strip()}")
+            return False
+
+    def clone_repo(self, target_dir: str = ".") -> bool:
+        """Clone the tool repository if repo_url is set."""
+        if not self.repo_url:
+            print(f"[-] No repo URL defined for {self.name}.")
+            return False
+        dest = os.path.join(target_dir, self.name)
+        if os.path.exists(dest):
+            print(f"[*] Repository already cloned at {dest}.")
+            return True
+        try:
+            subprocess.run(
+                ["git", "clone", self.repo_url, dest],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            print(f"[+] Cloned {self.repo_url} into {dest}.")
+            return True
+        except subprocess.CalledProcessError as exc:
+            print(f"[-] Git clone failed for {self.name}: {exc.stderr.decode().strip()}")
+            return False
+
+
+class ToolManager:
+    """Registry and manager for hacking tools."""
 
     def __init__(self):
-        super().__init__([
-            ("Update System", self.update_sys),
-            ("Update Hackingtool", self.update_ht),
-        ], installable=False, runnable=False)
+        self._tools: List[Tool] = []
 
-    def update_sys(self):
-        from os_detect import CURRENT_OS, PACKAGE_UPDATE_CMDS
-        mgr = CURRENT_OS.pkg_manager
-        cmd = PACKAGE_UPDATE_CMDS.get(mgr)
-        if cmd:
-            priv = "" if (CURRENT_OS.system == "macos" or os.geteuid() == 0) else "sudo "
-            # shell=True needed — cmd contains && chains; strings are hardcoded, not user input
-            subprocess.run(f"{priv}{cmd}", shell=True, check=False)
-        else:
-            console.print("[warning]Unknown package manager — update manually.[/warning]")
+    def register(self, tool: Tool) -> None:
+        self._tools.append(tool)
 
-    def update_ht(self):
-        if not APP_INSTALL_DIR.exists():
-            console.print(f"[error]Install directory not found: {APP_INSTALL_DIR}[/error]")
-            console.print("[dim]Run install.py first.[/dim]")
-            return
-        console.print(f"[bold cyan]Pulling latest code from {REPO_URL}...[/bold cyan]")
-        result = subprocess.run(
-            ["git", "pull", "--rebase"],
-            cwd=str(APP_INSTALL_DIR),
-            capture_output=True, text=True,
-        )
-        if result.returncode != 0:
-            console.print(f"[error]git pull failed:\n{result.stderr}[/error]")
-            return
-        pip = str(APP_INSTALL_DIR / "venv" / "bin" / "pip")
-        if (APP_INSTALL_DIR / "venv" / "bin" / "pip").exists():
-            subprocess.run([pip, "install", "-q", "-r",
-                            str(APP_INSTALL_DIR / "requirements.txt")])
-        console.print("[success]✔ Hackingtool updated.[/success]")
+    def get_by_category(self, category: str) -> List[Tool]:
+        return [t for t in self._tools if t.category.lower() == category.lower()]
 
+    def get_all(self) -> List[Tool]:
+        return list(self._tools)
 
-class UninstallTool(HackingTool):
-    TITLE = "Uninstall HackingTool"
-    DESCRIPTION = "Remove hackingtool from system"
+    def install_all(self, category: Optional[str] = None) -> None:
+        tools = self.get_by_category(category) if category else self.get_all()
+        for tool in tools:
+            if tool.is_installed():
+                print(f"[*] {tool.name} is already installed, skipping.")
+            else:
+                tool.install()
 
-    def __init__(self):
-        super().__init__([
-            ("Uninstall", self.uninstall),
-        ], installable=False, runnable=False)
-
-    def uninstall(self):
-        import shutil
-        console.print("[warning]This will remove hackingtool from your system.[/warning]")
-        if not Confirm.ask("Continue?", default=False):
-            return
-
-        if APP_INSTALL_DIR.exists():
-            shutil.rmtree(str(APP_INSTALL_DIR))
-            console.print(f"[success]✔ Removed {APP_INSTALL_DIR}[/success]")
-        else:
-            console.print(f"[dim]{APP_INSTALL_DIR} not found — already removed?[/dim]")
-
-        if APP_BIN_PATH.exists():
-            APP_BIN_PATH.unlink()
-            console.print(f"[success]✔ Removed launcher {APP_BIN_PATH}[/success]")
-
-        if Confirm.ask(f"Also remove user data at {USER_CONFIG_DIR}?", default=False):
-            shutil.rmtree(str(USER_CONFIG_DIR), ignore_errors=True)
-            console.print(f"[success]✔ Removed {USER_CONFIG_DIR}[/success]")
-
-        console.print("[bold green]Hackingtool uninstalled. Goodbye.[/bold green]")
-        sleep(1)
-        sys.exit(0)
-
-
-class ToolManager(HackingToolsCollection):
-    TITLE = "Update or Uninstall | Hackingtool"
-    TOOLS = [
-        UpdateTool(),
-        UninstallTool(),
-    ]
-
-
-if __name__ == "__main__":
-    manager = ToolManager()
-    manager.show_options()
+    def status_report(self) -> None:
+        print(f"{'Tool':<20} {'Category':<20} {'Installed':<10}")
+        print("-" * 50)
+        for tool in self._tools:
+            status = "Yes" if tool.is_installed() else "No"
+            print(f"{tool.name:<20} {tool.category:<20} {status:<10}")
