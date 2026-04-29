@@ -82,8 +82,16 @@ class ToolManager:
                 tool.install()
 
     def status_report(self) -> None:
+        # Added a count summary at the end so I can quickly see how many tools
+        # are installed vs total without having to count the rows manually.
         print(f"{'Tool':<20} {'Category':<20} {'Installed':<10}")
         print("-" * 50)
+        installed_count = 0
         for tool in self._tools:
-            status = "Yes" if tool.is_installed() else "No"
+            is_installed = tool.is_installed()
+            status = "Yes" if is_installed else "No"
             print(f"{tool.name:<20} {tool.category:<20} {status:<10}")
+            if is_installed:
+                installed_count += 1
+        print("-" * 50)
+        print(f"Installed: {installed_count}/{len(self._tools)}")
