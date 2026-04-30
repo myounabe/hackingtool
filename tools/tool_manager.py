@@ -88,10 +88,10 @@ class ToolManager:
         print("-" * 50)
         installed_count = 0
         for tool in self._tools:
-            is_installed = tool.is_installed()
-            status = "Yes" if is_installed else "No"
-            print(f"{tool.name:<20} {tool.category:<20} {status:<10}")
-            if is_installed:
+            installed = tool.is_installed()
+            if installed:
                 installed_count += 1
+            status = "Yes" if installed else "No"
+            print(f"{tool.name:<20} {tool.category:<20} {status:<10}")
         print("-" * 50)
         print(f"Installed: {installed_count}/{len(self._tools)}")
